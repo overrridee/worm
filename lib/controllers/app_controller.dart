@@ -1,11 +1,13 @@
 import 'dart:math';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/word_item.dart';
 import '../services/notification_service.dart';
+import '../services/quick_practice_audio_handler.dart';
 import '../services/tts_service.dart';
 
 /// Uygulamanın tüm veri, günlük sıra, ezberleme, pratik havuzu ve ayar mantığını yönetir.
@@ -13,6 +15,7 @@ class AppController extends ChangeNotifier {
   AppController({
     TtsService? ttsService,
     NotificationService? notificationService,
+    QuickPracticeAudioHandler? quickAudioHandler,
     DateTime Function()? nowProvider,
     Future<String> Function()? wordsLoader,
     Random? random,
@@ -20,7 +23,9 @@ class AppController extends ChangeNotifier {
         _notifications = notificationService ?? NotificationService(),
         _nowProvider = nowProvider ?? DateTime.now,
         _wordsLoader = wordsLoader ?? (() => rootBundle.loadString('words.txt')),
-        _random = random ?? Random();
+        _random = random ?? Random() {
+    _quickAudioHandler = quickAudioHandler;
+  }
 
   static const int practiceTargetCount = 10;
 
@@ -49,6 +54,7 @@ class AppController extends ChangeNotifier {
   final Random _random;
 
   late SharedPreferences _prefs;
+  QuickPracticeAudioHandler? _quickAudioHandler;
 
   bool _isLoading = true;
   String? _loadError;
@@ -99,6 +105,29 @@ class AppController extends ChangeNotifier {
   double get ttsSpeechRate => _ttsSpeechRate;
 
   TtsService get tts => _tts;
+
+  QuickPlaybackStatus get quickPlaybackStatus =>
+      _quickAudioHandler?.status ?? QuickPlaybackStatus.idle;
+  int get quickPlaybackIndex => _quickAudioHandler?.currentIndex ?? 0;
+  String get quickSpeakingPhase => _quickAudioHandler?.speakingPhase ?? '';
+
+  Future<void> startQuickPracticeFrom(int index) async {
+    await _ensureQuickAudioHandler();
+    await _quickAudioHandler!.startFromIndex(index, words: _allWords);
+  }
+
+  Future<void> pauseQuickPractice() async {
+    await _quickAudioHandler?.pause();
+  }
+
+  Future<void> resumeQuickPractice() async {
+    await _ensureQuickAudioHandler();
+    await _quickAudioHandler!.play();
+  }
+
+  Future<void> stopQuickPractice() async {
+    await _quickAudioHandler?.stop();
+  }
 
   List<WordItem> get dailyWords => _dailyWordKeys
       .map((k) => _wordMap[k])
@@ -155,8 +184,13 @@ class AppController extends ChangeNotifier {
       debugPrint('TTS başlatma uyarısı: $e');
     }
 
+    await _ensureQuickAudioHandler();
+
     try {
       await _notifications.init(onNotificationTap: onNotificationTap);
+      if (_dailyNotifEnabled || _practiceNotifEnabled) {
+        await _notifications.requestPermissions(requestExactAlarm: true);
+      }
       await _syncNotifications();
     } catch (e) {
       debugPrint('Bildirim başlatma uyarısı: $e');
@@ -199,7 +233,7 @@ class AppController extends ChangeNotifier {
     _practiceAutoSpeak = _prefs.getBool(_kPracticeAutoSpeak) ?? true;
     _practiceSpeakSentence = _prefs.getBool(_kPracticeSpeakSentence) ?? false;
     _ttsSpeechRate =
-        (_prefs.getDouble(_kTtsSpeechRate) ?? 0.48).clamp(0.25, 0.85);
+        (_prefs.getDouble(_kTtsSpeechRate) ?? 0.48).clamp(0.25, 1.0);
   }
 
   String _todayString() {
@@ -379,7 +413,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateDailyNotification({
+  Future<DateTime?> updateDailyNotification({
     bool? enabled,
     int? hour,
     int? minute,
@@ -393,13 +427,19 @@ class AppController extends ChangeNotifier {
     await _prefs.setInt(_kDailyNotifMinute, _dailyNotifMinute);
 
     if (_dailyNotifEnabled) {
-      await _notifications.requestPermissions();
+      await _notifications.requestPermissions(requestExactAlarm: true);
     }
-    await _syncNotifications();
+    final scheduled = await _notifications.scheduleDailyWordsReminder(
+      enabled: _dailyNotifEnabled,
+      hour: _dailyNotifHour,
+      minute: _dailyNotifMinute,
+      dailyWordCount: _dailyWordCount,
+    );
     notifyListeners();
+    return scheduled;
   }
 
-  Future<void> updatePracticeNotification({
+  Future<DateTime?> updatePracticeNotification({
     bool? enabled,
     int? hour,
     int? minute,
@@ -413,10 +453,19 @@ class AppController extends ChangeNotifier {
     await _prefs.setInt(_kPracticeNotifMinute, _practiceNotifMinute);
 
     if (_practiceNotifEnabled) {
-      await _notifications.requestPermissions();
+      await _notifications.requestPermissions(requestExactAlarm: true);
     }
-    await _syncNotifications();
+    final scheduled = await _notifications.schedulePracticeReminder(
+      enabled: _practiceNotifEnabled,
+      hour: _practiceNotifHour,
+      minute: _practiceNotifMinute,
+    );
     notifyListeners();
+    return scheduled;
+  }
+
+  Future<void> sendTestNotification() async {
+    await _notifications.sendTestNotification();
   }
 
   Future<void> setPracticeAutoSpeak(bool value) async {
@@ -434,8 +483,44 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _ensureQuickAudioHandler() async {
+    if (_quickAudioHandler != null) {
+      _quickAudioHandler!.onStateChanged = notifyListeners;
+      _quickAudioHandler!.setWords(_allWords);
+      return;
+    }
+
+    final handler = QuickPracticeAudioHandler(ttsService: _tts);
+    handler.onStateChanged = notifyListeners;
+    handler.setWords(_allWords);
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        _quickAudioHandler = await AudioService.init(
+          builder: () => handler,
+          config: const AudioServiceConfig(
+            androidNotificationChannelId: 'com.worm.worm.quick_practice',
+            androidNotificationChannelName: 'Hızlı Pratik Sesli Tekrar',
+            androidNotificationChannelDescription:
+                'Arka planda ve kilit ekranında sesli kelime tekrarı',
+            androidNotificationIcon: 'drawable/ic_stat_worm',
+            androidNotificationOngoing: true,
+            androidStopForegroundOnPause: true,
+          ),
+        );
+        _quickAudioHandler!.onStateChanged = notifyListeners;
+        _quickAudioHandler!.setWords(_allWords);
+        return;
+      } catch (e) {
+        debugPrint('AudioService başlatma uyarısı: $e');
+      }
+    }
+
+    _quickAudioHandler = handler;
+  }
+
   Future<void> setTtsSpeechRate(double rate) async {
-    _ttsSpeechRate = rate.clamp(0.25, 0.85);
+    _ttsSpeechRate = rate.clamp(0.25, 1.0);
     await _tts.setSpeechRate(_ttsSpeechRate);
     await _prefs.setDouble(_kTtsSpeechRate, _ttsSpeechRate);
     notifyListeners();

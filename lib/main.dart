@@ -158,8 +158,7 @@ class _WormHomePageState extends State<WormHomePage> with WidgetsBindingObserver
           bottomNavigationBar: NavigationBar(
             selectedIndex: _selectedIndex,
             onDestinationSelected: (index) {
-              if ((_selectedIndex == 1 && index != 1) ||
-                  (_selectedIndex == 2 && index != 2)) {
+              if (_selectedIndex == 1 && index != 1) {
                 _controller.tts.stop();
               }
               setState(() => _selectedIndex = index);

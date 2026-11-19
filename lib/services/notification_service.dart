@@ -12,6 +12,7 @@ class NotificationService {
 
   static const int dailyWordsNotificationId = 1001;
   static const int practiceNotificationId = 1002;
+  static const int testNotificationId = 1099;
 
   static const String payloadDaily = 'daily';
   static const String payloadPractice = 'practice';
@@ -45,6 +46,15 @@ class NotificationService {
         },
       );
       _initialized = true;
+
+      // Uygulama kapalıyken bildirime tıklanarak açıldıysa ilgili sekmeye yönlendir.
+      final launchDetails = await _plugin.getNotificationAppLaunchDetails();
+      final launchPayload = launchDetails?.notificationResponse?.payload;
+      if ((launchDetails?.didNotificationLaunchApp ?? false) &&
+          launchPayload != null &&
+          launchPayload.isNotEmpty) {
+        _onTap?.call(launchPayload);
+      }
     } catch (e) {
       debugPrint('Bildirim initialize hatası: $e');
     }
@@ -55,7 +65,6 @@ class NotificationService {
     final offsetMs = DateTime.now().timeZoneOffset.inMilliseconds;
     tz.Location? matched;
 
-    // Türkiye (+03:00) ve diğer yaygın saat dilimleri için öncelikli kontrol
     const preferredZones = <String>[
       'Europe/Istanbul',
       'Europe/London',
@@ -65,7 +74,8 @@ class NotificationService {
     ];
     for (final name in preferredZones) {
       final loc = tz.getLocation(name);
-      if (loc.currentTimeZone.offset == offsetMs) {
+      final liveOffsetMs = tz.TZDateTime.now(loc).timeZoneOffset.inMilliseconds;
+      if (liveOffsetMs == offsetMs) {
         matched = loc;
         break;
       }
@@ -73,7 +83,9 @@ class NotificationService {
 
     if (matched == null) {
       for (final loc in tz.timeZoneDatabase.locations.values) {
-        if (loc.currentTimeZone.offset == offsetMs) {
+        final liveOffsetMs =
+            tz.TZDateTime.now(loc).timeZoneOffset.inMilliseconds;
+        if (liveOffsetMs == offsetMs) {
           matched = loc;
           break;
         }
@@ -83,7 +95,7 @@ class NotificationService {
     tz.setLocalLocation(matched ?? tz.UTC);
   }
 
-  Future<bool> requestPermissions() async {
+  Future<bool> requestPermissions({bool requestExactAlarm = false}) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       return true;
     }
@@ -92,20 +104,40 @@ class NotificationService {
         AndroidFlutterLocalNotificationsPlugin>();
     if (androidPlugin == null) return false;
 
-    final notifGranted = await androidPlugin.requestNotificationsPermission();
-    return notifGranted ?? true;
+    var notifGranted = true;
+    try {
+      notifGranted =
+          (await androidPlugin.requestNotificationsPermission()) ?? true;
+    } catch (e) {
+      debugPrint('Bildirim izni isteme hatası: $e');
+    }
+
+    if (requestExactAlarm) {
+      try {
+        final canExact =
+            (await androidPlugin.canScheduleExactNotifications()) ?? false;
+        if (!canExact) {
+          await androidPlugin.requestExactAlarmsPermission();
+        }
+      } catch (e) {
+        debugPrint('Exact alarm izni isteme hatası: $e');
+      }
+    }
+
+    return notifGranted;
   }
 
-  Future<void> scheduleDailyWordsReminder({
+  /// Kurulan bir sonraki bildirim zamanını döndürür (devre dışıysa `null`).
+  Future<DateTime?> scheduleDailyWordsReminder({
     required bool enabled,
     required int hour,
     required int minute,
     required int dailyWordCount,
   }) async {
     await _cancel(dailyWordsNotificationId);
-    if (!enabled) return;
+    if (!enabled) return null;
 
-    await _scheduleDaily(
+    return _scheduleDaily(
       id: dailyWordsNotificationId,
       hour: hour,
       minute: minute,
@@ -118,15 +150,16 @@ class NotificationService {
     );
   }
 
-  Future<void> schedulePracticeReminder({
+  /// Kurulan bir sonraki bildirim zamanını döndürür (devre dışıysa `null`).
+  Future<DateTime?> schedulePracticeReminder({
     required bool enabled,
     required int hour,
     required int minute,
   }) async {
     await _cancel(practiceNotificationId);
-    if (!enabled) return;
+    if (!enabled) return null;
 
-    await _scheduleDaily(
+    return _scheduleDaily(
       id: practiceNotificationId,
       hour: hour,
       minute: minute,
@@ -137,6 +170,39 @@ class NotificationService {
       channelDescription: 'Her gün ezberlenen kelimeleri tekrar etmek için hatırlatma',
       payload: payloadPractice,
     );
+  }
+
+  /// Bildirimlerin cihazda anında çalıştığını doğrulamak için test bildirimi gönderir.
+  Future<void> sendTestNotification() async {
+    if (!_initialized || kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    await requestPermissions(requestExactAlarm: true);
+
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'worm_daily_words',
+        'Günlük Kelimeler',
+        channelDescription: 'Her gün yeni ezberlenecek kelimeler için hatırlatma',
+        importance: Importance.max,
+        priority: Priority.max,
+        icon: 'ic_stat_worm',
+        color: Color(0xFF6366F1),
+      ),
+    );
+
+    try {
+      await _plugin.show(
+        testNotificationId,
+        'Worm Bildirim Testi',
+        'Harika! Zamanlanmış bildirimler bu cihazda sorunsuz çalışıyor.',
+        details,
+        payload: payloadDaily,
+      );
+    } catch (e) {
+      debugPrint('Test bildirimi hatası: $e');
+    }
   }
 
   Future<void> _cancel(int id) async {
@@ -150,7 +216,7 @@ class NotificationService {
     }
   }
 
-  Future<void> _scheduleDaily({
+  Future<DateTime?> _scheduleDaily({
     required int id,
     required int hour,
     required int minute,
@@ -162,7 +228,7 @@ class NotificationService {
     required String payload,
   }) async {
     if (!_initialized || kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      return;
+      return null;
     }
 
     final scheduledDate = _nextInstanceOfTime(hour, minute);
@@ -171,8 +237,8 @@ class NotificationService {
         channelId,
         channelName,
         channelDescription: channelDescription,
-        importance: Importance.high,
-        priority: Priority.high,
+        importance: Importance.max,
+        priority: Priority.max,
         icon: 'ic_stat_worm',
         color: const Color(0xFF6366F1),
       ),
@@ -189,8 +255,8 @@ class NotificationService {
         matchDateTimeComponents: DateTimeComponents.time,
         payload: payload,
       );
+      return scheduledDate;
     } catch (e) {
-      // Exact alarm izni verilmemişse inexact moda düşerek bildirimin yine de çalışmasını sağla.
       debugPrint('Exact bildirim hatası, inexact moda geçiliyor: $e');
       try {
         await _plugin.zonedSchedule(
@@ -203,8 +269,10 @@ class NotificationService {
           matchDateTimeComponents: DateTimeComponents.time,
           payload: payload,
         );
+        return scheduledDate;
       } catch (innerError) {
         debugPrint('Bildirim planlama hatası ($id): $innerError');
+        return null;
       }
     }
   }
@@ -219,7 +287,7 @@ class NotificationService {
       hour,
       minute,
     );
-    if (scheduled.isBefore(now)) {
+    if (!scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
     return scheduled;

@@ -18,7 +18,8 @@ class SettingsScreen extends StatelessWidget {
     required BuildContext context,
     required int initialHour,
     required int initialMinute,
-    required Future<void> Function(int hour, int minute) onPicked,
+    required Future<DateTime?> Function(int hour, int minute) onPicked,
+    required String label,
   }) async {
     final picked = await showTimePicker(
       context: context,
@@ -31,7 +32,24 @@ class SettingsScreen extends StatelessWidget {
       },
     );
     if (picked != null) {
-      await onPicked(picked.hour, picked.minute);
+      final scheduled = await onPicked(picked.hour, picked.minute);
+      if (!context.mounted) return;
+      if (scheduled != null) {
+        final now = DateTime.now();
+        final isToday = scheduled.year == now.year &&
+            scheduled.month == now.month &&
+            scheduled.day == now.day;
+        final dayText = isToday ? 'bugün' : 'yarın';
+        final timeText = _formatTime(picked.hour, picked.minute);
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text('$label $dayText $timeText için kuruldu.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+      }
     }
   }
 
@@ -146,6 +164,7 @@ class SettingsScreen extends StatelessWidget {
                           context: context,
                           initialHour: controller.dailyNotifHour,
                           initialMinute: controller.dailyNotifMinute,
+                          label: 'Yeni kelime bildirimi',
                           onPicked: (h, m) => controller.updateDailyNotification(
                             hour: h,
                             minute: m,
@@ -185,6 +204,7 @@ class SettingsScreen extends StatelessWidget {
                           context: context,
                           initialHour: controller.practiceNotifHour,
                           initialMinute: controller.practiceNotifMinute,
+                          label: 'Pratik bildirimi',
                           onPicked: (h, m) =>
                               controller.updatePracticeNotification(
                             hour: h,
@@ -201,6 +221,19 @@ class SettingsScreen extends StatelessWidget {
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
+                ),
+              ),
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.notifications_none_rounded),
+              title: const Text('Bildirimleri Test Et'),
+              subtitle: const Text('Cihaz izinlerini kontrol eder ve anında bildirim atar'),
+              trailing: TextButton(
+                onPressed: controller.sendTestNotification,
+                child: const Text(
+                  'Test Gönder',
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
             ),
@@ -256,11 +289,11 @@ class SettingsScreen extends StatelessWidget {
                     ],
                   ),
                   Slider(
-                    value: controller.ttsSpeechRate,
+                    value: controller.ttsSpeechRate.clamp(0.25, 1.0),
                     min: 0.25,
-                    max: 0.75,
-                    divisions: 10,
-                    label: controller.ttsSpeechRate.toStringAsFixed(2),
+                    max: 1.0,
+                    divisions: 15,
+                    label: '${(0.52 + controller.ttsSpeechRate).toStringAsFixed(2)}x',
                     onChanged: controller.setTtsSpeechRate,
                   ),
                 ],

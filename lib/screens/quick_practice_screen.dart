@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../controllers/app_controller.dart';
 import '../models/word_item.dart';
+import '../services/quick_practice_audio_handler.dart';
 
-enum _PlaybackState { idle, playing, paused }
-
-/// Tüm kelimeleri sırasıyla yalnızca İngilizce + Türkçe anlamlarıyla listeleyen
-/// ve seri sesli tekrar (İngilizce -> Türkçe) imkanı sunan Hızlı Pratik ekranı.
+/// Tüm kelimeleri sırasıyla yalnızca İngilizce + Türkçe anlamlarıyla listeleyen,
+/// arka planda / kilit ekranında da seri sesli tekrar (İngilizce -> Türkçe)
+/// yapabilen ve hız seçimi sunan Hızlı Pratik ekranı.
 class QuickPracticeScreen extends StatefulWidget {
   const QuickPracticeScreen({
     super.key,
@@ -23,105 +23,26 @@ class QuickPracticeScreen extends StatefulWidget {
 
 class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
   final ScrollController _scrollController = ScrollController();
+  int _lastScrolledIndex = -1;
 
-  _PlaybackState _playbackState = _PlaybackState.idle;
-  int _currentIndex = 0;
-  int _sessionToken = 0;
-  String _speakingPhase = '';
-
-  @override
-  void didUpdateWidget(covariant QuickPracticeScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isActiveTab &&
-        !widget.isActiveTab &&
-        _playbackState == _PlaybackState.playing) {
-      _pausePlayback();
-    }
-  }
+  static const _speedPresets = <({String label, double rate})>[
+    (label: '0.75x', rate: 0.23),
+    (label: '1.0x', rate: 0.48),
+    (label: '1.25x', rate: 0.73),
+    (label: '1.5x', rate: 0.98),
+  ];
 
   @override
   void dispose() {
-    _sessionToken++;
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _startFromIndex(int index) {
-    final words = widget.controller.allWords;
-    if (words.isEmpty) return;
-
-    final safeIndex = index.clamp(0, words.length - 1);
-    final token = ++_sessionToken;
-
-    setState(() {
-      _currentIndex = safeIndex;
-      _playbackState = _PlaybackState.playing;
-      _speakingPhase = 'EN';
-    });
-
-    _runPlaybackLoop(safeIndex, token);
-  }
-
-  Future<void> _pausePlayback() async {
-    if (_playbackState != _PlaybackState.playing) return;
-    _sessionToken++;
-    await widget.controller.tts.stop();
-    if (!mounted) return;
-    setState(() {
-      _playbackState = _PlaybackState.paused;
-      _speakingPhase = '';
-    });
-  }
-
-  Future<void> _stopPlayback() async {
-    _sessionToken++;
-    await widget.controller.tts.stop();
-    if (!mounted) return;
-    setState(() {
-      _playbackState = _PlaybackState.idle;
-      _speakingPhase = '';
-    });
-  }
-
-  Future<void> _runPlaybackLoop(int startIndex, int token) async {
-    final words = widget.controller.allWords;
-
-    for (var i = startIndex; i < words.length; i++) {
-      if (!mounted || token != _sessionToken) return;
-
-      final word = words[i];
-      setState(() {
-        _currentIndex = i;
-        _speakingPhase = 'EN';
-      });
-      _scrollToIndexIfNeeded(i);
-
-      final enCompleted =
-          await widget.controller.tts.speakWordAndWait(word.foreignWord);
-      if (!enCompleted || !mounted || token != _sessionToken) return;
-
-      await Future<void>.delayed(const Duration(milliseconds: 220));
-      if (!mounted || token != _sessionToken) return;
-
-      setState(() => _speakingPhase = 'TR');
-      final trCompleted = await widget.controller.tts
-          .speakTurkishAndWait(word.key, word.meanings);
-      if (!trCompleted || !mounted || token != _sessionToken) return;
-
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-      if (!mounted || token != _sessionToken) return;
-    }
-
-    if (mounted && token == _sessionToken) {
-      setState(() {
-        _playbackState = _PlaybackState.idle;
-        _speakingPhase = '';
-      });
-    }
-  }
-
   void _scrollToIndexIfNeeded(int index) {
-    if (!_scrollController.hasClients) return;
+    if (!widget.isActiveTab || !_scrollController.hasClients) return;
+    if (_lastScrolledIndex == index) return;
+    _lastScrolledIndex = index;
+
     const estimatedItemHeight = 82.0;
     final targetOffset = (index * estimatedItemHeight) - 120.0;
     final maxExtent = _scrollController.position.maxScrollExtent;
@@ -132,7 +53,6 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
     final itemTop = index * estimatedItemHeight;
     final itemBottom = itemTop + estimatedItemHeight;
 
-    // Yalnızca aktif kelime görünür alanın dışındaysa yumuşakça kaydır.
     if (itemTop < currentOffset || itemBottom > currentOffset + viewport) {
       _scrollController.animateTo(
         clampedOffset,
@@ -140,6 +60,19 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
         curve: Curves.easeOutCubic,
       );
     }
+  }
+
+  String _selectedSpeedLabel(double currentRate) {
+    var best = _speedPresets[1];
+    var minDiff = (currentRate - best.rate).abs();
+    for (final preset in _speedPresets) {
+      final diff = (currentRate - preset.rate).abs();
+      if (diff < minDiff) {
+        minDiff = diff;
+        best = preset;
+      }
+    }
+    return best.label;
   }
 
   @override
@@ -154,13 +87,24 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
       );
     }
 
-    final safeCurrent = _currentIndex.clamp(0, words.length - 1);
+    final status = widget.controller.quickPlaybackStatus;
+    final safeCurrent =
+        widget.controller.quickPlaybackIndex.clamp(0, words.length - 1);
+    final speakingPhase = widget.controller.quickSpeakingPhase;
     final currentWord = words[safeCurrent];
-    final isActiveSession = _playbackState != _PlaybackState.idle;
+    final isActiveSession = status != QuickPlaybackStatus.idle;
+    final activeSpeedLabel =
+        _selectedSpeedLabel(widget.controller.ttsSpeechRate);
+
+    if (status == QuickPlaybackStatus.playing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToIndexIfNeeded(safeCurrent);
+      });
+    }
 
     return Column(
       children: [
-        // Üst başlık ve seri sesli tekrar kontrolleri
+        // Üst başlık, okuma hızı ve seri sesli tekrar kontrolleri
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
           child: Column(
@@ -179,7 +123,7 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                         ),
                       ),
                       Text(
-                        '${words.length} kelime • Sıralı liste • Dokunarak başlat',
+                        '${words.length} kelime • Arka planda ve kilit ekranında çalışır',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
@@ -206,15 +150,64 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+
+              // Hız seçici satırı
+              Row(
+                children: [
+                  Icon(
+                    Icons.speed_rounded,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Hız:',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: _speedPresets.map((preset) {
+                          final selected = preset.label == activeSpeedLabel;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ChoiceChip(
+                              label: Text(preset.label),
+                              selected: selected,
+                              visualDensity: VisualDensity.compact,
+                              labelStyle: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                                color: selected
+                                    ? colorScheme.onPrimaryContainer
+                                    : colorScheme.onSurfaceVariant,
+                              ),
+                              onSelected: (_) => widget.controller
+                                  .setTtsSpeechRate(preset.rate),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
 
               // Oynatma kontrol butonları
               Row(
                 children: [
-                  if (_playbackState == _PlaybackState.idle)
+                  if (status == QuickPlaybackStatus.idle)
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: () => _startFromIndex(safeCurrent),
+                        onPressed: () =>
+                            widget.controller.startQuickPracticeFrom(safeCurrent),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(48),
                           shape: RoundedRectangleBorder(
@@ -233,26 +226,25 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                   else ...[
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _playbackState == _PlaybackState.playing
-                            ? _pausePlayback
-                            : () => _startFromIndex(safeCurrent),
+                        onPressed: status == QuickPlaybackStatus.playing
+                            ? widget.controller.pauseQuickPractice
+                            : widget.controller.resumeQuickPractice,
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(48),
-                          backgroundColor:
-                              _playbackState == _PlaybackState.playing
-                                  ? colorScheme.secondary
-                                  : colorScheme.primary,
+                          backgroundColor: status == QuickPlaybackStatus.playing
+                              ? colorScheme.secondary
+                              : colorScheme.primary,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),
                         ),
                         icon: Icon(
-                          _playbackState == _PlaybackState.playing
+                          status == QuickPlaybackStatus.playing
                               ? Icons.pause_rounded
                               : Icons.play_arrow_rounded,
                         ),
                         label: Text(
-                          _playbackState == _PlaybackState.playing
+                          status == QuickPlaybackStatus.playing
                               ? 'Duraklat'
                               : 'Devam Et',
                           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -261,7 +253,7 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                     ),
                     const SizedBox(width: 10),
                     OutlinedButton.icon(
-                      onPressed: _stopPlayback,
+                      onPressed: widget.controller.stopQuickPractice,
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(110, 48),
                         shape: RoundedRectangleBorder(
@@ -292,7 +284,7 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                   child: Row(
                     children: [
                       Icon(
-                        _playbackState == _PlaybackState.playing
+                        status == QuickPlaybackStatus.playing
                             ? Icons.graphic_eq_rounded
                             : Icons.pause_circle_outline_rounded,
                         size: 18,
@@ -301,8 +293,8 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _playbackState == _PlaybackState.playing
-                              ? 'Okunuyor: ${currentWord.foreignWord.toUpperCase()} (${_speakingPhase == 'TR' ? 'Türkçe' : 'İngilizce'})'
+                          status == QuickPlaybackStatus.playing
+                              ? 'Okunuyor: ${currentWord.foreignWord.toUpperCase()} (${speakingPhase == 'TR' ? 'Türkçe' : 'İngilizce'})'
                               : 'Duraklatıldı: ${currentWord.foreignWord.toUpperCase()}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -334,14 +326,14 @@ class _QuickPracticeScreenState extends State<QuickPracticeScreen> {
                 final isSelected =
                     index == safeCurrent && (isActiveSession || index > 0);
                 final isPlayingNow = index == safeCurrent &&
-                    _playbackState == _PlaybackState.playing;
+                    status == QuickPlaybackStatus.playing;
 
                 return _QuickWordRow(
                   index: index,
                   word: word,
                   isHighlighted: isSelected,
                   isPlayingNow: isPlayingNow,
-                  onTap: () => _startFromIndex(index),
+                  onTap: () => widget.controller.startQuickPracticeFrom(index),
                 );
               },
             ),

@@ -7,6 +7,7 @@ import 'package:worm/controllers/app_controller.dart';
 import 'package:worm/main.dart';
 import 'package:worm/models/word_item.dart';
 import 'package:worm/services/notification_service.dart';
+import 'package:worm/services/quick_practice_audio_handler.dart';
 import 'package:worm/services/tts_service.dart';
 
 class _FakeTtsService extends TtsService {
@@ -50,26 +51,47 @@ class _FakeTtsService extends TtsService {
 }
 
 class _FakeNotificationService extends NotificationService {
+  int dailyScheduleCount = 0;
+  int practiceScheduleCount = 0;
+
   @override
   Future<void> init({void Function(String payload)? onNotificationTap}) async {}
 
   @override
-  Future<bool> requestPermissions() async => true;
+  Future<bool> requestPermissions({bool requestExactAlarm = false}) async => true;
 
   @override
-  Future<void> scheduleDailyWordsReminder({
+  Future<DateTime?> scheduleDailyWordsReminder({
     required bool enabled,
     required int hour,
     required int minute,
     required int dailyWordCount,
-  }) async {}
+  }) async {
+    dailyScheduleCount++;
+    if (!enabled) return null;
+    final now = DateTime.now();
+    var target = DateTime(now.year, now.month, now.day, hour, minute);
+    if (!target.isAfter(now)) {
+      target = target.add(const Duration(days: 1));
+    }
+    return target;
+  }
 
   @override
-  Future<void> schedulePracticeReminder({
+  Future<DateTime?> schedulePracticeReminder({
     required bool enabled,
     required int hour,
     required int minute,
-  }) async {}
+  }) async {
+    practiceScheduleCount++;
+    if (!enabled) return null;
+    final now = DateTime.now();
+    var target = DateTime(now.year, now.month, now.day, hour, minute);
+    if (!target.isAfter(now)) {
+      target = target.add(const Duration(days: 1));
+    }
+    return target;
+  }
 }
 
 String _sampleWordsTxt(int count) {
@@ -135,9 +157,11 @@ void main() {
 
   test('Ezberlenmeyen kelimeler sonraki güne sırası bozulmadan devreder', () async {
     var currentDate = DateTime(2026, 11, 17, 10, 0);
+    final fakeTts = _FakeTtsService();
     final controller = AppController(
-      ttsService: _FakeTtsService(),
+      ttsService: fakeTts,
       notificationService: _FakeNotificationService(),
+      quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
       nowProvider: () => currentDate,
       wordsLoader: () async => _sampleWordsTxt(15),
       random: Random(42),
@@ -168,9 +192,11 @@ void main() {
 
   test('Pratik havuzu tükendiğinde kullanılan kelimeler tekrar havuza dahil edilir', () async {
     var currentDate = DateTime(2026, 11, 17, 10, 0);
+    final fakeTts = _FakeTtsService();
     final controller = AppController(
-      ttsService: _FakeTtsService(),
+      ttsService: fakeTts,
       notificationService: _FakeNotificationService(),
+      quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
       nowProvider: () => currentDate,
       wordsLoader: () async => _sampleWordsTxt(20),
       random: Random(7),
@@ -205,6 +231,7 @@ void main() {
     final controller = AppController(
       ttsService: fakeTts,
       notificationService: _FakeNotificationService(),
+      quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
       wordsLoader: () async => _sampleWordsTxt(15),
     );
 
@@ -218,6 +245,9 @@ void main() {
     await tester.tap(find.text('Hızlı Pratik'));
     await tester.pumpAndSettle();
     expect(find.text('Sesli Tekrar Et'), findsOneWidget);
+    expect(find.text('0.75x'), findsOneWidget);
+    expect(find.text('1.25x'), findsOneWidget);
+    expect(find.text('1.5x'), findsOneWidget);
 
     // Ezberlenenler sekmesine geç
     await tester.tap(find.text('Ezberlenen'));
@@ -228,5 +258,27 @@ void main() {
     await tester.tap(find.text('Ayarlar'));
     await tester.pumpAndSettle();
     expect(find.text('Günlük Kelime Sayısı'), findsOneWidget);
+  });
+
+  test('Bildirim saati her değiştirildiğinde yeniden planlanır', () async {
+    final fakeNotif = _FakeNotificationService();
+    final fakeTts = _FakeTtsService();
+    final controller = AppController(
+      ttsService: fakeTts,
+      notificationService: fakeNotif,
+      quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
+      wordsLoader: () async => _sampleWordsTxt(10),
+    );
+
+    await controller.init();
+    expect(fakeNotif.dailyScheduleCount, 1);
+    expect(fakeNotif.practiceScheduleCount, 1);
+
+    await controller.updateDailyNotification(hour: 23, minute: 58);
+    await controller.updateDailyNotification(hour: 23, minute: 59);
+    expect(fakeNotif.dailyScheduleCount, 3);
+
+    await controller.updatePracticeNotification(hour: 23, minute: 55);
+    expect(fakeNotif.practiceScheduleCount, 2);
   });
 }

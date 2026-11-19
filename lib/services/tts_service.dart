@@ -25,14 +25,14 @@ class TtsService {
 
   AudioPlayer get _audioPlayer => _player ??= AudioPlayer();
 
-  double get _audioPlaybackRate => (0.52 + _speechRate).clamp(0.7, 1.35);
+  double get _audioPlaybackRate => (0.52 + _speechRate).clamp(0.7, 1.55);
 
   static String safeSlug(String text) {
     return text.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '_');
   }
 
   Future<void> init({double speechRate = 0.48}) async {
-    _speechRate = speechRate.clamp(0.25, 0.85);
+    _speechRate = speechRate.clamp(0.25, 1.0);
     await _initTtsOnly();
   }
 
@@ -55,7 +55,7 @@ class TtsService {
   }
 
   Future<void> setSpeechRate(double rate) async {
-    _speechRate = rate.clamp(0.25, 0.85);
+    _speechRate = rate.clamp(0.25, 1.0);
     try {
       if (_player != null) {
         await _audioPlayer.setPlaybackRate(_audioPlaybackRate);
