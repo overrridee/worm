@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Worm uygulaması için açık renkli modern uygulama ikonu (ic_launcher),
-Android Adaptive Icon (ic_launcher_foreground) ve bildirim ikonu (ic_stat_worm) üretir.
+Worm uygulaması için Duolingo tarzı sade, sevimli ve açık renkli
+"solucanı (worm) patisiyle yakalayan kedi" uygulama ikonu ve bildirim ikonu üretir.
 """
 
 from pathlib import Path
@@ -35,31 +35,14 @@ NOTIF_SIZES = {
 }
 
 
-def draw_worm_glyph(
+def draw_smooth_curve(
     draw: ImageDraw.ImageDraw,
-    size: int,
-    *,
-    stroke_color: tuple[int, int, int, int],
-    dot_color: tuple[int, int, int, int],
-    scale: float = 1.0,
+    pts: list[tuple[float, float]],
+    width: int,
+    color: tuple[int, int, int, int],
 ) -> None:
-    """Kart içinde 'W' formunda yumuşak kıvrımlı minimalist kitap kurdu glifi çizer."""
-    cx, cy = size / 2, size / 2
-    s = size * scale
-
-    # 'W' formunda akıcı 5 nokta
-    pts = [
-        (cx - 0.25 * s, cy - 0.09 * s),
-        (cx - 0.125 * s, cy + 0.13 * s),
-        (cx, cy - 0.05 * s),
-        (cx + 0.125 * s, cy + 0.13 * s),
-        (cx + 0.25 * s, cy - 0.11 * s),
-    ]
-
-    width = max(2, int(0.085 * s))
-    # Catmull-Rom benzeri yumuşak interpolasyon noktaları
     smooth_pts: list[tuple[float, float]] = []
-    steps = 18
+    steps = 20
     extended = [pts[0]] + pts + [pts[-1]]
     for i in range(1, len(extended) - 2):
         p0, p1, p2, p3 = extended[i - 1], extended[i], extended[i + 1], extended[i + 2]
@@ -83,105 +66,208 @@ def draw_worm_glyph(
     smooth_pts.append(pts[-1])
 
     for i in range(len(smooth_pts) - 1):
-        draw.line([smooth_pts[i], smooth_pts[i + 1]], fill=stroke_color, width=width)
+        draw.line([smooth_pts[i], smooth_pts[i + 1]], fill=color, width=width)
     r = width / 2
     for px, py in smooth_pts:
-        draw.ellipse([px - r, py - r, px + r, py + r], fill=stroke_color)
+        draw.ellipse([px - r, py - r, px + r, py + r], fill=color)
 
-    # Sağ üst uçta minik parlak nokta (kitap kurdu başı / vurgu)
-    hx, hy = pts[-1][0], pts[-1][1] - 0.11 * s
-    hr = max(2, int(0.052 * s))
-    draw.ellipse([hx - hr, hy - hr, hx + hr, hy + hr], fill=dot_color)
+
+def draw_cat_and_worm(
+    draw: ImageDraw.ImageDraw,
+    size: int,
+    *,
+    scale: float = 1.0,
+) -> None:
+    s = size * scale
+    ox = (size - s) / 2
+    oy = (size - s) / 2
+
+    def pt(nx: float, ny: float) -> tuple[float, float]:
+        return (ox + nx * s, oy + ny * s)
+
+    cat_main = (255, 178, 107, 255)      # Sıcak pastel şeftali/turuncu
+    cat_dark = (240, 146, 72, 255)       # Hafif gölge turuncu
+    cat_cream = (255, 243, 226, 255)     # Krem yanak/pati
+    ear_pink = (255, 152, 172, 255)      # Tatlı pembe kulak içi & burun
+    eye_dark = (43, 39, 71, 255)         # Koyu indigo göz bebeği
+    white = (255, 255, 255, 255)
+    worm_green = (45, 212, 149, 255)     # Canlı mint yeşili solucan
+    worm_light = (110, 231, 183, 255)    # Solucan parlama
+
+    # 1. Kedi kulakları (doğal üçgen)
+    left_ear = [pt(0.18, 0.42), pt(0.20, 0.16), pt(0.39, 0.29)]
+    right_ear = [pt(0.64, 0.42), pt(0.62, 0.16), pt(0.43, 0.29)]
+    draw.polygon(left_ear, fill=cat_main)
+    draw.polygon(right_ear, fill=cat_main)
+
+    # Kulak içi pembe
+    draw.polygon([pt(0.215, 0.37), pt(0.23, 0.22), pt(0.35, 0.30)], fill=ear_pink)
+    draw.polygon([pt(0.605, 0.37), pt(0.59, 0.22), pt(0.47, 0.30)], fill=ear_pink)
+
+    # 2. Kedi gövdesi (alt kısım)
+    body_box = [pt(0.22, 0.56)[0], pt(0.56)[1] if False else oy + 0.56 * s, ox + 0.60 * s, oy + 0.92 * s]
+    draw.rounded_rectangle(body_box, radius=int(0.16 * s), fill=cat_dark)
+
+    # Göbek krem lekesi
+    belly_box = [ox + 0.30 * s, oy + 0.64 * s, ox + 0.52 * s, oy + 0.90 * s]
+    draw.ellipse(belly_box, fill=cat_cream)
+
+    # 3. Kedi kafası (yuvarlak sevimli form)
+    head_box = [ox + 0.15 * s, oy + 0.25 * s, ox + 0.67 * s, oy + 0.72 * s]
+    draw.ellipse(head_box, fill=cat_main)
+
+    # Yanak / ağız krem alanı
+    muzzle_l = [ox + 0.29 * s, oy + 0.49 * s, ox + 0.42 * s, oy + 0.62 * s]
+    muzzle_r = [ox + 0.40 * s, oy + 0.49 * s, ox + 0.53 * s, oy + 0.62 * s]
+    draw.ellipse(muzzle_l, fill=cat_cream)
+    draw.ellipse(muzzle_r, fill=cat_cream)
+
+    # 4. Büyük Duolingo tarzı gözler (sağa, solucana doğru bakıyor)
+    for cx_n in (0.31, 0.51):
+        gx, gy = pt(cx_n, 0.44)
+        ew, eh = 0.072 * s, 0.082 * s
+        draw.ellipse([gx - ew, gy - eh, gx + ew, gy + eh], fill=white)
+        # Göz bebeği sağa/hafif yukarı (solucana odaklanmış)
+        px, py = gx + 0.018 * s, gy - 0.004 * s
+        pw, ph = 0.044 * s, 0.052 * s
+        draw.ellipse([px - pw, py - ph, px + pw, py + ph], fill=eye_dark)
+        # Parıltı noktası
+        sx, sy = px - 0.015 * s, py - 0.018 * s
+        sr = 0.015 * s
+        draw.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=white)
+
+    # 5. Minik pembe burun + tatlı gülümseme + bıyıklar
+    nx, ny = pt(0.41, 0.525)
+    draw.polygon(
+        [
+            (nx - 0.028 * s, ny - 0.014 * s),
+            (nx + 0.028 * s, ny - 0.014 * s),
+            (nx, ny + 0.020 * s),
+        ],
+        fill=ear_pink,
+    )
+    draw.arc(
+        [ox + 0.35 * s, oy + 0.52 * s, ox + 0.41 * s, oy + 0.58 * s],
+        start=15,
+        end=165,
+        fill=eye_dark,
+        width=max(2, int(0.012 * s)),
+    )
+    draw.arc(
+        [ox + 0.41 * s, oy + 0.52 * s, ox + 0.47 * s, oy + 0.58 * s],
+        start=15,
+        end=165,
+        fill=eye_dark,
+        width=max(2, int(0.012 * s)),
+    )
+
+    # Bıyıklar (sol taraf + sağ taraf kısa ve üstte)
+    w_width = max(2, int(0.008 * s))
+    draw.line([pt(0.12, 0.48), pt(0.23, 0.50)], fill=cat_dark, width=w_width)
+    draw.line([pt(0.11, 0.54), pt(0.23, 0.54)], fill=cat_dark, width=w_width)
+    draw.line([pt(0.58, 0.49), pt(0.66, 0.47)], fill=cat_dark, width=w_width)
+    draw.line([pt(0.59, 0.53), pt(0.66, 0.53)], fill=cat_dark, width=w_width)
+
+    # 6. Solucan (Worm) — sağ üstte kıvrılan sevimli mint yeşili solucan
+    worm_pts = [
+        pt(0.84, 0.25),
+        pt(0.78, 0.35),
+        pt(0.85, 0.44),
+        pt(0.76, 0.54),
+        pt(0.68, 0.57),
+    ]
+    draw_smooth_curve(draw, worm_pts, width=max(4, int(0.082 * s)), color=worm_green)
+
+    # Solucan kafasında hafif parlaklık & sevimli gözler
+    whx, why = pt(0.84, 0.24)
+    whr = 0.048 * s
+    draw.ellipse([whx - whr, why - whr, whx + whr, why + whr], fill=worm_light)
+    w_eye_r = 0.012 * s
+    for ex_off in (-0.019 * s, 0.019 * s):
+        ex = whx + ex_off
+        ey = why - 0.006 * s
+        draw.ellipse([ex - w_eye_r, ey - w_eye_r, ex + w_eye_r, ey + w_eye_r], fill=eye_dark)
+        sr = 0.004 * s
+        draw.ellipse([ex - sr, ey - sr, ex + sr, ey + sr], fill=white)
+
+    # 7. Kedinin sağ ön patisi — solucanı nazikçe yakalıyor!
+    paw_pts = [pt(0.54, 0.69), pt(0.65, 0.62), pt(0.73, 0.54)]
+    draw_smooth_curve(draw, paw_pts, width=max(4, int(0.095 * s)), color=cat_main)
+    px, py = pt(0.735, 0.535)
+    pr = 0.048 * s
+    draw.ellipse([px - pr, py - pr, px + pr, py + pr], fill=cat_cream)
+    draw.line([pt(0.725, 0.505), pt(0.75, 0.52)], fill=cat_dark, width=w_width)
+    draw.line([pt(0.745, 0.53), pt(0.77, 0.545)], fill=cat_dark, width=w_width)
 
 
 def create_launcher_master(size: int = 1024, include_bg: bool = True) -> Image.Image:
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    # 2x supersampling ile jilet gibi yumuşak kenarlar
+    work_size = size * 2
+    img = Image.new("RGBA", (work_size, work_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     if include_bg:
-        # Açık lavanta/buz mavisi yumuşak dikey gradyan
         top = (244, 247, 255)
-        bottom = (224, 232, 255)
-        for y in range(size):
-            t = y / (size - 1)
+        bottom = (222, 232, 255)
+        for y in range(work_size):
+            t = y / (work_size - 1)
             r = int(top[0] + (bottom[0] - top[0]) * t)
             g = int(top[1] + (bottom[1] - top[1]) * t)
             b = int(top[2] + (bottom[2] - top[2]) * t)
-            draw.line([(0, y), (size, y)], fill=(r, g, b, 255))
+            draw.line([(0, y), (work_size, y)], fill=(r, g, b, 255))
 
-    # Merkez beyaz kelime kartı + yumuşak gölge
-    card_margin = int(size * (0.19 if include_bg else 0.24))
-    card_rect = [card_margin, card_margin, size - card_margin, size - card_margin]
-    card_radius = int(size * 0.14)
+        # Yumuşak beyaz daire arka vurgu
+        pad = int(work_size * 0.11)
+        draw.ellipse(
+            [pad, pad, work_size - pad, work_size - pad],
+            fill=(255, 255, 255, 190),
+        )
 
-    shadow_offset = int(size * 0.022)
-    shadow_rect = [
-        card_rect[0],
-        card_rect[1] + shadow_offset,
-        card_rect[2],
-        card_rect[3] + shadow_offset,
-    ]
-    draw.rounded_rectangle(
-        shadow_rect,
-        radius=card_radius,
-        fill=(99, 102, 241, 28),
-    )
-
-    draw.rounded_rectangle(
-        card_rect,
-        radius=card_radius,
-        fill=(255, 255, 255, 255),
-        outline=(210, 220, 255, 255),
-        width=max(2, int(size * 0.01)),
-    )
-
-    # Üstte ince pastel dekoratif çizgi (kart başlığı hissi)
-    bar_w = int(size * 0.16)
-    bar_h = max(3, int(size * 0.022))
-    bar_x0 = (size - bar_w) // 2
-    bar_y0 = card_rect[1] + int(size * 0.065)
-    draw.rounded_rectangle(
-        [bar_x0, bar_y0, bar_x0 + bar_w, bar_y0 + bar_h],
-        radius=bar_h // 2,
-        fill=(218, 226, 255, 255),
-    )
-
-    # Merkez 'W' / worm glifi
-    draw_worm_glyph(
-        draw,
-        size,
-        stroke_color=(99, 102, 241, 255),  # Canlı ama yumuşak indigo
-        dot_color=(52, 211, 153, 255),  # Ferah mint yeşili
-        scale=0.68 if include_bg else 0.56,
-    )
-
-    return img
+    draw_cat_and_worm(draw, work_size, scale=0.82 if include_bg else 0.66)
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def create_notification_master(size: int = 512) -> Image.Image:
-    """Android bildirim çubuğu için şeffaf arka planlı saf beyaz silüet."""
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    """Bildirim çubuğu için şeffaf arka planlı sade beyaz kedi + solucan silüeti."""
+    work_size = size * 2
+    img = Image.new("RGBA", (work_size, work_size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
+    white = (255, 255, 255, 255)
+    clear = (0, 0, 0, 0)
 
-    # Yuvarlak hatlı kart çerçevesi
-    m = int(size * 0.14)
-    r = int(size * 0.16)
-    stroke_w = max(4, int(size * 0.075))
-    draw.rounded_rectangle(
-        [m, m, size - m, size - m],
-        radius=r,
-        outline=(255, 255, 255, 255),
-        width=stroke_w,
-    )
+    s = work_size * 0.84
+    ox = (work_size - s) / 2
+    oy = (work_size - s) / 2
 
-    draw_worm_glyph(
+    def pt(nx: float, ny: float) -> tuple[float, float]:
+        return (ox + nx * s, oy + ny * s)
+
+    # Kedi kulakları ve kafa silüeti
+    draw.polygon([pt(0.18, 0.44), pt(0.20, 0.16), pt(0.39, 0.30)], fill=white)
+    draw.polygon([pt(0.64, 0.44), pt(0.62, 0.16), pt(0.43, 0.30)], fill=white)
+    draw.ellipse([ox + 0.14 * s, oy + 0.26 * s, ox + 0.68 * s, oy + 0.76 * s], fill=white)
+
+    # Şeffaf kesim gözler (silüet içinde okunur)
+    for cx_n in (0.31, 0.51):
+        gx, gy = pt(cx_n, 0.47)
+        er = 0.055 * s
+        draw.ellipse([gx - er, gy - er, gx + er, gy + er], fill=clear)
+
+    # Pati ve solucan silüeti
+    draw_smooth_curve(
         draw,
-        size,
-        stroke_color=(255, 255, 255, 255),
-        dot_color=(255, 255, 255, 255),
-        scale=0.62,
+        [pt(0.56, 0.68), pt(0.68, 0.58)],
+        width=max(4, int(0.095 * s)),
+        color=white,
     )
-    return img
+    draw_smooth_curve(
+        draw,
+        [pt(0.86, 0.24), pt(0.79, 0.36), pt(0.86, 0.46), pt(0.75, 0.56)],
+        width=max(4, int(0.085 * s)),
+        color=white,
+    )
+
+    return img.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def main() -> None:
@@ -189,7 +275,6 @@ def main() -> None:
     master_fg = create_launcher_master(1024, include_bg=False)
     master_notif = create_notification_master(512)
 
-    # Assets içine önizleme/yedek olarak da kaydet
     preview_path = ROOT / "assets" / "icon_preview.png"
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     master_launcher.save(preview_path)
@@ -197,22 +282,24 @@ def main() -> None:
     for folder, px in MIPMAP_SIZES.items():
         out_dir = RES / folder
         out_dir.mkdir(parents=True, exist_ok=True)
-        resized = master_launcher.resize((px, px), Image.Resampling.LANCZOS)
-        resized.save(out_dir / "ic_launcher.png")
+        master_launcher.resize((px, px), Image.Resampling.LANCZOS).save(
+            out_dir / "ic_launcher.png"
+        )
 
     for folder, px in ADAPTIVE_FG_SIZES.items():
         out_dir = RES / folder
         out_dir.mkdir(parents=True, exist_ok=True)
-        resized = master_fg.resize((px, px), Image.Resampling.LANCZOS)
-        resized.save(out_dir / "ic_launcher_foreground.png")
+        master_fg.resize((px, px), Image.Resampling.LANCZOS).save(
+            out_dir / "ic_launcher_foreground.png"
+        )
 
     for folder, px in NOTIF_SIZES.items():
         out_dir = RES / folder
         out_dir.mkdir(parents=True, exist_ok=True)
-        resized = master_notif.resize((px, px), Image.Resampling.LANCZOS)
-        resized.save(out_dir / "ic_stat_worm.png")
+        master_notif.resize((px, px), Image.Resampling.LANCZOS).save(
+            out_dir / "ic_stat_worm.png"
+        )
 
-    # Adaptive icon XML ve açık arka plan rengi
     anydpi_dir = RES / "mipmap-anydpi-v26"
     anydpi_dir.mkdir(parents=True, exist_ok=True)
     (anydpi_dir / "ic_launcher.xml").write_text(
@@ -236,7 +323,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print("Uygulama ikonları ve bildirim ikonları başarıyla oluşturuldu.")
+    print("Yeni kedi & solucan uygulama ve bildirim ikonları oluşturuldu.")
 
 
 if __name__ == "__main__":

@@ -212,12 +212,38 @@ class _MemorizedWordTile extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    word.foreignWord.toUpperCase(),
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.8,
-                    ),
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      Text(
+                        word.foreignWord.toUpperCase(),
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      if (word.partOfSpeech.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colorScheme.tertiaryContainer
+                                .withValues(alpha: 0.65),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            word.partOfSpeech,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colorScheme.onTertiaryContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
                 IconButton(
@@ -265,6 +291,29 @@ class _MemorizedWordTile extends StatelessWidget {
                   )
                   .toList(),
             ),
+            if (word.memoryHint.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.lightbulb_outline_rounded,
+                    size: 16,
+                    color: Colors.amber.shade800,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      word.memoryHint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (word.exampleSentence.isNotEmpty) ...[
               const SizedBox(height: 12),
               Container(

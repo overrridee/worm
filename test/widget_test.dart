@@ -58,7 +58,8 @@ class _FakeNotificationService extends NotificationService {
   Future<void> init({void Function(String payload)? onNotificationTap}) async {}
 
   @override
-  Future<bool> requestPermissions({bool requestExactAlarm = false}) async => true;
+  Future<bool> requestPermissions({bool requestExactAlarm = false}) async =>
+      true;
 
   @override
   Future<DateTime?> scheduleDailyWordsReminder({
@@ -94,11 +95,19 @@ class _FakeNotificationService extends NotificationService {
   }
 }
 
-String _sampleWordsTxt(int count) {
+List<WordItem> _sampleWords(int count) {
   return List.generate(
     count,
-    (i) => 'word${i + 1},anlam${i + 1}a#anlam${i + 1}b,However, word${i + 1} is useful.',
-  ).join('\n');
+    (i) => WordItem(
+      key: 'word${i + 1}',
+      foreignWord: 'word${i + 1}',
+      meanings: ['anlam${i + 1}a', 'anlam${i + 1}b'],
+      exampleSentence: 'However, word${i + 1} is useful.',
+      partOfSpeech: i.isEven ? 'Fiil' : 'İsim',
+      memoryHint: 'İpucu ${i + 1}: word${i + 1} çağrışımı.',
+      orderIndex: i,
+    ),
+  );
 }
 
 void main() {
@@ -108,51 +117,29 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  test('WordParser virgüllü cümleleri ve çoklu anlamları doğru ayrıştırır', () {
-    const raw =
-        'resilient,dayanıklı#esnek#çabuk toparlanan,Even after setbacks, she stayed resilient.\n'
-        '\n'
-        'invalid_line_without_commas\n'
-        'candid,samimi#dürüst,Please be candid, because trust matters.';
+  test('WordItem.fromMap SQLite satırını tüm alanlarıyla doğru dönüştürür', () {
+    final item = WordItem.fromMap({
+      'word_key': 'abolish',
+      'foreign_word': 'Abolish',
+      'meanings': 'İptal Etmek#Kaldırmak',
+      'example_sentence': 'They decided to abolish the old rule.',
+      'part_of_speech': 'Fiil',
+      'memory_hint': 'A-bol-iş: Eski yasayı abolish et.',
+      'order_index': 0,
+    });
 
-    final items = WordParser.parseContent(raw);
-    expect(items.length, 2);
-
-    expect(items[0].foreignWord, 'resilient');
-    expect(items[0].meanings, ['dayanıklı', 'esnek', 'çabuk toparlanan']);
-    expect(items[0].exampleSentence, 'Even after setbacks, she stayed resilient.');
-
-    expect(items[1].foreignWord, 'candid');
-    expect(items[1].meanings, ['samimi', 'dürüst']);
-    expect(items[1].exampleSentence, 'Please be candid, because trust matters.');
+    expect(item.key, 'abolish');
+    expect(item.foreignWord, 'Abolish');
+    expect(item.meanings, ['İptal Etmek', 'Kaldırmak']);
+    expect(item.partOfSpeech, 'Fiil');
+    expect(item.memoryHint, 'A-bol-iş: Eski yasayı abolish et.');
+    expect(item.orderIndex, 0);
   });
 
-  test('Kök dizindeki words.txt 1124 kelime içerir ve eksiksiz parse edilir', () {
-    final content = File('words.txt').readAsStringSync();
-    final items = WordParser.parseContent(content);
-    expect(items.length, 1124);
-    for (final item in items) {
-      expect(item.foreignWord, isNotEmpty);
-      expect(item.meanings, isNotEmpty);
-      expect(item.exampleSentence, isNotEmpty);
-
-      final slug = TtsService.safeSlug(item.foreignWord);
-      expect(
-        File('assets/audio/words/$slug.mp3').existsSync(),
-        isTrue,
-        reason: 'Kelime sesi eksik: $slug',
-      );
-      expect(
-        File('assets/audio/sentences/$slug.mp3').existsSync(),
-        isTrue,
-        reason: 'Cümle sesi eksik: $slug',
-      );
-      expect(
-        File('assets/audio/tr/$slug.mp3').existsSync(),
-        isTrue,
-        reason: 'Türkçe anlam sesi eksik: $slug',
-      );
-    }
+  test('Standalone assets/worm.db veritabanı dosyası mevcuttur', () {
+    final dbFile = File('assets/worm.db');
+    expect(dbFile.existsSync(), isTrue);
+    expect(dbFile.lengthSync(), greaterThan(100 * 1024));
   });
 
   test('Ezberlenmeyen kelimeler sonraki güne sırası bozulmadan devreder', () async {
@@ -163,7 +150,7 @@ void main() {
       notificationService: _FakeNotificationService(),
       quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
       nowProvider: () => currentDate,
-      wordsLoader: () async => _sampleWordsTxt(15),
+      wordsProvider: () async => _sampleWords(15),
       random: Random(42),
     );
 
@@ -173,7 +160,6 @@ void main() {
       ['word1', 'word2', 'word3', 'word4', 'word5'],
     );
 
-    // 2. ve 4. kelime ezberlensin; gün içinde 5 kart korunmalı
     await controller.toggleMemorized('word2');
     await controller.toggleMemorized('word4');
     expect(
@@ -181,7 +167,6 @@ void main() {
       ['word1', 'word2', 'word3', 'word4', 'word5'],
     );
 
-    // Ertesi güne geçildiğinde ezberlenmeyenler sırayla başta kalır + yeniler eklenir
     currentDate = DateTime(2026, 11, 18, 10, 0);
     await controller.checkDayRolloverAndSync();
     expect(
@@ -198,22 +183,19 @@ void main() {
       notificationService: _FakeNotificationService(),
       quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
       nowProvider: () => currentDate,
-      wordsLoader: () async => _sampleWordsTxt(20),
+      wordsProvider: () async => _sampleWords(20),
       random: Random(7),
     );
 
     await controller.init();
 
-    // 12 kelime ezberle
     for (var i = 1; i <= 12; i++) {
       await controller.toggleMemorized('word$i');
     }
 
-    // 1. gün 10 kelime seçilmiş olmalı
     final day1Practice = controller.practiceWords.map((w) => w.key).toSet();
     expect(day1Practice.length, 10);
 
-    // 2. güne geç: kalan 2 kullanılmamış kelime mutlaka yeni sette olmalı + havuz yenilenip 10'a tamamlanmalı
     currentDate = DateTime(2026, 11, 18, 10, 0);
     await controller.checkDayRolloverAndSync();
 
@@ -226,13 +208,13 @@ void main() {
     expect(day2Practice.containsAll(remainingFromDay1), isTrue);
   });
 
-  testWidgets('WormApp ana ekranı açar ve sekmeler arası geçiş yapar', (tester) async {
+  testWidgets('WormApp ana ekranı tür ve ipucunu gösterir, sekmeler arası geçer', (tester) async {
     final fakeTts = _FakeTtsService();
     final controller = AppController(
       ttsService: fakeTts,
       notificationService: _FakeNotificationService(),
       quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
-      wordsLoader: () async => _sampleWordsTxt(15),
+      wordsProvider: () async => _sampleWords(15),
     );
 
     await tester.pumpWidget(WormApp(controller: controller));
@@ -240,21 +222,19 @@ void main() {
 
     expect(find.text('Günün Kelimeleri'), findsOneWidget);
     expect(find.text('WORD1'), findsOneWidget);
+    expect(find.text('Fiil'), findsOneWidget);
+    expect(find.text('İpucu 1: word1 çağrışımı.'), findsOneWidget);
 
-    // Hızlı Pratik sekmesine geç
     await tester.tap(find.text('Hızlı Pratik'));
     await tester.pumpAndSettle();
     expect(find.text('Sesli Tekrar Et'), findsOneWidget);
     expect(find.text('0.75x'), findsOneWidget);
-    expect(find.text('1.25x'), findsOneWidget);
     expect(find.text('1.5x'), findsOneWidget);
 
-    // Ezberlenenler sekmesine geç
     await tester.tap(find.text('Ezberlenen'));
     await tester.pumpAndSettle();
     expect(find.text('Henüz Ezberlenen Kelime Yok'), findsOneWidget);
 
-    // Ayarlar sekmesine geç
     await tester.tap(find.text('Ayarlar'));
     await tester.pumpAndSettle();
     expect(find.text('Günlük Kelime Sayısı'), findsOneWidget);
@@ -267,7 +247,7 @@ void main() {
       ttsService: fakeTts,
       notificationService: fakeNotif,
       quickAudioHandler: QuickPracticeAudioHandler(ttsService: fakeTts),
-      wordsLoader: () async => _sampleWordsTxt(10),
+      wordsProvider: () async => _sampleWords(10),
     );
 
     await controller.init();

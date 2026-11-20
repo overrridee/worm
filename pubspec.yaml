@@ -40,6 +40,8 @@ dependencies:
   timezone: ^0.10.1
   audioplayers: ^6.8.1
   audio_service: ^0.18.19
+  sqflite: ^2.4.6
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
@@ -64,7 +66,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - words.txt
+    - assets/worm.db
     - assets/audio/words/
     - assets/audio/sentences/
     - assets/audio/tr/

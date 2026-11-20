@@ -9,6 +9,7 @@ Kullanım:
 
 import asyncio
 import re
+import sqlite3
 from pathlib import Path
 
 import edge_tts
@@ -17,7 +18,7 @@ EN_VOICE = "en-US-AriaNeural"
 TR_VOICE = "tr-TR-EmelNeural"
 
 ROOT = Path(__file__).resolve().parent.parent
-WORDS_FILE = ROOT / "words.txt"
+DB_FILE = ROOT / "assets" / "worm.db"
 WORDS_AUDIO_DIR = ROOT / "assets" / "audio" / "words"
 SENTENCES_AUDIO_DIR = ROOT / "assets" / "audio" / "sentences"
 TR_AUDIO_DIR = ROOT / "assets" / "audio" / "tr"
@@ -27,27 +28,23 @@ def safe_slug(text: str) -> str:
     return re.sub(r"[^a-z0-9_]", "_", text.strip().lower())
 
 
-def parse_words(path: Path) -> list[tuple[str, str, str, str]]:
+def load_words_from_db(db_path: Path) -> list[tuple[str, str, str, str]]:
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT foreign_word, meanings, example_sentence FROM words ORDER BY order_index ASC"
+        ).fetchall()
+    finally:
+        conn.close()
+
     items: list[tuple[str, str, str, str]] = []
     seen: set[str] = set()
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        first_comma = line.index(",") if "," in line else -1
-        if first_comma <= 0:
-            continue
-        second_comma = line.index(",", first_comma + 1) if "," in line[first_comma + 1 :] else -1
-        if second_comma <= first_comma + 1:
-            continue
-        word = line[:first_comma].strip()
-        meanings_raw = line[first_comma + 1 : second_comma].strip()
+    for word, meanings_raw, sentence in rows:
         meanings_text = ", ".join(m.strip() for m in meanings_raw.split("#") if m.strip())
-        sentence = line[second_comma + 1 :].strip()
         slug = safe_slug(word)
         if slug and slug not in seen:
             seen.add(slug)
-            items.append((slug, word, meanings_text, sentence))
+            items.append((slug, word.strip(), meanings_text, sentence.strip()))
     return items
 
 
@@ -72,7 +69,7 @@ async def main() -> None:
     SENTENCES_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     TR_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-    items = parse_words(WORDS_FILE)
+    items = load_words_from_db(DB_FILE)
     print(f"Toplam {len(items)} kelime bulundu. Eksik ses dosyaları üretiliyor...")
 
     sem = asyncio.Semaphore(6)

@@ -2,13 +2,13 @@ import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/word_item.dart';
 import '../services/notification_service.dart';
 import '../services/quick_practice_audio_handler.dart';
 import '../services/tts_service.dart';
+import '../services/word_database.dart';
 
 /// Uygulamanın tüm veri, günlük sıra, ezberleme, pratik havuzu ve ayar mantığını yönetir.
 class AppController extends ChangeNotifier {
@@ -17,12 +17,12 @@ class AppController extends ChangeNotifier {
     NotificationService? notificationService,
     QuickPracticeAudioHandler? quickAudioHandler,
     DateTime Function()? nowProvider,
-    Future<String> Function()? wordsLoader,
+    Future<List<WordItem>> Function()? wordsProvider,
     Random? random,
   })  : _tts = ttsService ?? TtsService(),
         _notifications = notificationService ?? NotificationService(),
         _nowProvider = nowProvider ?? DateTime.now,
-        _wordsLoader = wordsLoader ?? (() => rootBundle.loadString('words.txt')),
+        _wordsProvider = wordsProvider ?? (() => WordDatabase().loadAllWords()),
         _random = random ?? Random() {
     _quickAudioHandler = quickAudioHandler;
   }
@@ -50,7 +50,7 @@ class AppController extends ChangeNotifier {
   final TtsService _tts;
   final NotificationService _notifications;
   final DateTime Function() _nowProvider;
-  final Future<String> Function() _wordsLoader;
+  final Future<List<WordItem>> Function() _wordsProvider;
   final Random _random;
 
   late SharedPreferences _prefs;
@@ -162,8 +162,7 @@ class AppController extends ChangeNotifier {
 
     try {
       _prefs = await SharedPreferences.getInstance();
-      final content = await _wordsLoader();
-      _allWords = WordParser.parseContent(content);
+      _allWords = await _wordsProvider();
       _wordMap
         ..clear()
         ..addEntries(_allWords.map((w) => MapEntry(w.key, w)));

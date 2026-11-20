@@ -2,15 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORDS_FILE="$ROOT_DIR/words.txt"
+DB_FILE="$ROOT_DIR/assets/worm.db"
 AUDIO_DIR="$ROOT_DIR/assets/audio"
 STAMP_FILE="$AUDIO_DIR/.stamp"
 VENV_DIR="$ROOT_DIR/.venv_tts"
 
 mkdir -p "$AUDIO_DIR/words" "$AUDIO_DIR/sentences" "$AUDIO_DIR/tr"
 
-# Eğer stamp dosyası words.txt'den yeniyse ve ses klasörleri doluysa tekrar çalıştırma.
-if [[ -f "$STAMP_FILE" && "$STAMP_FILE" -nt "$WORDS_FILE" ]]; then
+# Eğer stamp dosyası worm.db'den yeniyse ve ses klasörleri doluysa tekrar çalıştırma.
+if [[ -f "$STAMP_FILE" && "$STAMP_FILE" -nt "$DB_FILE" ]]; then
   if compgen -G "$AUDIO_DIR/words/*.mp3" > /dev/null && \
      compgen -G "$AUDIO_DIR/sentences/*.mp3" > /dev/null && \
      compgen -G "$AUDIO_DIR/tr/*.mp3" > /dev/null; then

@@ -62,24 +62,52 @@ class WordFlashcard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Üst bilgi satırı: Sayfa sayacı ve durum rozeti
+            // Üst bilgi satırı: Sayfa sayacı, tür rozeti ve durum rozeti
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    badgeText ?? '${index + 1} / $total',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: primary,
-                      fontWeight: FontWeight.w700,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        badgeText ?? '${index + 1} / $total',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (word.partOfSpeech.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colorScheme.tertiaryContainer
+                              .withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          word.partOfSpeech,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: colorScheme.onTertiaryContainer,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 if (isActionDone)
                   Container(
@@ -171,7 +199,46 @@ class WordFlashcard extends StatelessWidget {
               ),
             ),
 
-            const Spacer(flex: 3),
+            const Spacer(flex: 2),
+
+            // Hafıza İpucu (Çağrışım)
+            if (word.memoryHint.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: Colors.amber.shade700.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.lightbulb_outline_rounded,
+                      size: 18,
+                      color: Colors.amber.shade800,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        word.memoryHint,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurface.withValues(alpha: 0.85),
+                          height: 1.35,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
 
             // Örnek Yabancı Cümle + Hoparlör
             if (word.exampleSentence.isNotEmpty)
